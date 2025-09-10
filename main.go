@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -42,17 +43,31 @@ func main() {
 }
 
 func get_song() string {
-	script := `tell application "Music" to if player state is playing then artist of current track & " - " & name of current track`
-	cmd := exec.Command("osascript", "-e", script)
-	output, err := cmd.Output()
-	if err != nil {
-		fmt.Println("Error:", err)
-		return ""
+	switch runtime.GOOS {
+	case "darwin":
+		script := `tell application "Music" to if player state is playing then artist of current track & " - " & name of current track`
+		cmd := exec.Command("osascript", "-e", script)
+		output, err := cmd.Output()
+		if err != nil {
+			fmt.Println("Error:", err)
+			return ""
+		}
+
+		song := strings.TrimSpace(string(output))
+
+		return song
+	case "linux":
+		cmd := exec.Command("playerctl", "metadata", "--format", "{{artist}} - {{title}}")
+		output, err := cmd.Output()
+		if err != nil {
+			return "something went wrong, maybe you need to install playerctl?"
+		}
+		return strings.TrimSpace(string(output))
+
+	default:
+		// another os?
+		return "something went wrong..."
 	}
-
-	song := strings.TrimSpace(string(output))
-
-	return song
 }
 
 func update_slack_song(music string) {
@@ -73,7 +88,8 @@ func update_slack_song(music string) {
 
 	req, err := http.NewRequest("POST", "https://slack.com/api/users.profile.set", bytes.NewBuffer(data))
 	if err != nil {
-		panic(err)
+		fmt.Println("Slack request error:", err)
+		return
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -82,7 +98,8 @@ func update_slack_song(music string) {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		panic(err)
+		fmt.Println("Slack request error:", err)
+		return
 	}
 	defer resp.Body.Close()
 }
