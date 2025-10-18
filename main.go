@@ -6,9 +6,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
-	"runtime"
-	"strings"
 	"time"
 )
 
@@ -21,22 +18,17 @@ type Payload struct {
 	Profile Profile `json:"profile"`
 }
 
+type Song struct {
+	Title  string
+	Artist string
+	Album  string
+}
+
 func init() {
 	log.Default().SetFlags(0)
 	log.SetFlags(log.Ltime | log.Lmicroseconds)
 	log.SetPrefix("[slack-music-status] ")
 	log.Println("starting...")
-
-	// Detect os
-
-	switch runtime.GOOS {
-	case "darwin":
-		log.Println("macos user, only apple music is supported for now :)")
-	case "linux":
-		log.Println("woa linux :D, install playerctl")
-	default:
-		log.Fatal("i think we don't support your os yet : " + runtime.GOOS)
-	}
 
 	// Check for SLACK_TOKEN env var
 
@@ -47,60 +39,62 @@ func init() {
 
 func main() {
 
-	lastSong := ""
+	lastSong := Song{}
 
 	for {
 		song := get_song()
 
 		if song != lastSong {
-			if song == "" {
-				log.Println("Nothing playing, clearing status…")
-				update_slack_song("")
-			} else {
-				log.Println("Now playing:", song)
-				update_slack_song(song)
-			}
+			log.Println("Now playing:", song)
+			update_slack_song(song)
 			lastSong = song
 		}
 
-		time.Sleep(5 * time.Second)
+		time.Sleep(1 * time.Second)
 	}
 }
 
-func get_song() string {
-	switch runtime.GOOS {
-	case "darwin":
-		script := `tell application "Music" to if player state is playing then artist of current track & " - " & name of current track`
-		cmd := exec.Command("osascript", "-e", script)
-		output, err := cmd.Output()
-		if err != nil {
-			log.Println("error:", err)
-			return ""
-		}
+func get_song() Song {
+	var userHomeDir, err = os.UserHomeDir()
+	data, err := os.ReadFile(userHomeDir + "/music.log")
+	if err != nil {
+		log.Println("error reading music log:", err)
+		return Song{}
+	}
 
-		song := strings.TrimSpace(string(output))
+	lines := bytes.Split(data, []byte("\n"))
+	if len(lines) < 2 {
+		return Song{}
+	}
 
-		return song
-	case "linux":
-		cmd := exec.Command("playerctl", "metadata", "--format", "{{artist}} - {{title}}")
-		output, err := cmd.Output()
-		if err != nil {
-			return "something went wrong, maybe you need to install playerctl?"
-		}
-		return strings.TrimSpace(string(output))
+	lastLine := lines[len(lines)-2] // last line is empty, so take second last
+	fields := bytes.Split(lastLine, []byte("|"))
 
-	default:
-		// another os?
-		return "something went wrong..."
+	if len(fields) < 8 {
+		return Song{}
+	}
+
+	title := string(fields[5])
+	artist := string(fields[6])
+	album := string(fields[7])
+
+	if title == "null" || artist == "null" || album == "null" {
+		return Song{}
+	}
+
+	return Song{
+		Title:  title,
+		Artist: artist,
+		Album:  album,
 	}
 }
 
-func update_slack_song(music string) {
+func update_slack_song(music Song) {
 	slackToken := os.Getenv("SLACK_TOKEN")
 
 	payload := Payload{
 		Profile: Profile{
-			StatusText:  music,
+			StatusText:  music.Title + " - " + music.Artist,
 			StatusEmoji: ":notes:",
 		},
 	}
