@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -55,7 +56,7 @@ func main() {
 }
 
 func get_song() Song {
-	var userHomeDir, err = os.UserHomeDir()
+	userHomeDir, _ := os.UserHomeDir()
 	data, err := os.ReadFile(userHomeDir + "/music.log")
 	if err != nil {
 		log.Println("error reading music log:", err)
@@ -67,10 +68,19 @@ func get_song() Song {
 		return Song{}
 	}
 
-	lastLine := lines[len(lines)-2] // last line is empty, so take second last
+	lastLine := lines[len(lines)-2]
 	fields := bytes.Split(lastLine, []byte("|"))
 
 	if len(fields) < 8 {
+		return Song{}
+	}
+
+	// Check timestamp
+	ts, err := strconv.ParseFloat(string(fields[0]), 64)
+	if err != nil {
+		return Song{}
+	}
+	if time.Since(time.Unix(int64(ts), 0)) > 5*time.Minute {
 		return Song{}
 	}
 
@@ -82,19 +92,20 @@ func get_song() Song {
 		return Song{}
 	}
 
-	return Song{
-		Title:  title,
-		Artist: artist,
-		Album:  album,
-	}
+	return Song{Title: title, Artist: artist, Album: album}
 }
 
 func update_slack_song(music Song) {
 	slackToken := os.Getenv("SLACK_TOKEN")
 
+	statusText := ""
+	if music.Title != "" && music.Artist != "" {
+		statusText = music.Title + " - " + music.Artist
+	}
+
 	payload := Payload{
 		Profile: Profile{
-			StatusText:  music.Title + " - " + music.Artist,
+			StatusText:  statusText,
 			StatusEmoji: ":notes:",
 		},
 	}
